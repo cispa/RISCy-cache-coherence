@@ -1,0 +1,27 @@
+\documentclass[border=6pt]{standalone}
+
+\usepackage{booktabs}
+\usepackage{makecell}
+\usepackage{multirow}
+\usepackage{xcolor}
+\usepackage{pifont}
+\usepackage{tikz}
+\usetikzlibrary{calc}
+
+\newcommand{\cmark}{\ding{51}}
+\newcommand{\bbtwo}{B2}
+
+\newcommand{\dotscale}[2]{%
+    \ensuremath{\vcenter{%
+        \hbox{%
+            \begin{tikzpicture}[y=-1ex]
+                \draw[thick] ($(-1pt, 0)$) -- ($(#1, 0)$) -- +(1pt, 0);
+                \filldraw[circle] ($(#2 * #1, 0)$) circle (2pt);
+            \end{tikzpicture}%
+        }%
+    }}%
+}
+
+\begin{document}
+\input{b2_ctg_prevalence_table.tex}
+\end{document}

@@ -1,0 +1,22 @@
+\documentclass[border=6pt]{standalone}
+
+\usepackage{booktabs}
+\usepackage{makecell}
+\usepackage{siunitx}
+\usepackage{tikz}
+\usetikzlibrary{calc}
+
+\newcommand{\dotscale}[2]{%
+    \ensuremath{\vcenter{%
+        \hbox{%
+            \begin{tikzpicture}[y=-1ex]
+                \draw[thick] ($(-1pt, 0)$) -- ($(#1, 0)$) -- +(1pt, 0);
+                \filldraw[circle] ($(#2 * #1, 0)$) circle (2pt);
+            \end{tikzpicture}%
+        }%
+    }}%
+}
+
+\begin{document}
+\input{table.tex}
+\end{document}

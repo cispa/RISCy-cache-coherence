@@ -1,0 +1,231 @@
+#!/usr/bin/env python3
+import shutil
+import os
+import sys
+import argparse
+import subprocess as sp
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Iterable, Tuple
+
+assert(os.getenv("ARCH") == "merged")
+
+EXPERIMENT = os.path.basename(os.getcwd())
+EXTRA_MAKE_ARGS = []
+BUILD_DIR = Path("out")
+
+# Example machines
+MACHINES = {
+    # aarch64
+    "lab47":   {"arch": "aarch64", "cores": {0: "Cortex-A72"}},
+    "lab08":   {"arch": "aarch64", "cores": {0: "Cortex-A53",  2: "Cortex-A73"}},
+    "lab39":   {"arch": "aarch64", "cores": {0: "Cortex-A55",  4: "Cortex-A76"}},
+    "lab83":   {"arch": "aarch64", "cores": {0: "Neoverse-N1"}},
+    "lab11":   {"arch": "aarch64", "cores": {0: "Icestorm", 4: "Firestorm"}},
+    "lab71":   {"arch": "aarch64", "cores": {0: "Kunpeng Pro"}, "variant": ["mfence_8"]},
+    "lab27":   {"arch": "aarch64", "cores": {0: "Carmel"}},
+    "phone09": {"arch": "aarch64", "cores": {0: "Cortex-A520", 4: "Cortex-A720", 7: "Cortex-X4"}},
+    "phone08": {"arch": "aarch64", "cores": {7: "Cortex-A725"}},
+    "lab87":   {"arch": "aarch64", "cores": {4: "Cortex-A78"}, "variant": ["mfence_64"]},
+    "lab88":   {"arch": "aarch64", "cores": {7: "Oryon"}},
+
+    # riscv64
+    "lab53":   {"arch": "riscv64", "cores": {0: "C910"}, "variant": ["thead"]},
+    # NOTE: For accurate measurements you might need to use a non-static on-target-machine compiled version.
+    # THEAD=1 make -B run
+    "lab24":   {"arch": "riscv64", "cores": {0: "C906"}, "variant": "thead"},
+    "lab52":   {"arch": "riscv64", "cores": {0: "C908"}, "variant": ["thead", "mfence_8"]},
+    # NOTE: For accurate measurements you might need to use a non-static on-target-machine compiled version.
+    # make -B run
+    "lab70":   {"arch": "riscv64", "cores": {0: "X60"}, "variant": ["mfence_8"]},
+
+    # loongarch64
+    "lab67": {"arch": "loongarch64", "cores": {0: "3A5000-HV"}, "variant": ["itlb_prime"]},
+}
+LOG_DIR = Path("logs")
+RESULT_DIR = Path(f"{EXPERIMENT}_results")
+
+def result_path_mapping(machine, core, uarch):
+    remote = (f"{EXPERIMENT}_results_{core}.csv",)
+    local = (RESULT_DIR / f"{uarch}.csv",)
+    return remote, local
+
+PRFX_BY_ARCH = {
+    "aarch64":     "aarch64-unknown-linux-musl-",
+    "riscv64":     "riscv64-unknown-linux-musl-",
+    "loongarch64": "loongarch64-unknown-linux-musl-",
+}
+
+LOG_DIR.mkdir(exist_ok=True)
+RESULT_DIR.mkdir(exist_ok=True)
+BUILD_DIR.mkdir(parents=True, exist_ok=True)
+
+# Expand .gitginore
+patterns = [
+    EXPERIMENT,
+    "logs",
+    "out",
+]
+
+gi_path = ".gitignore"
+
+try:
+    with open(gi_path, "r", encoding="utf-8") as f:
+        existing = {line.strip() for line in f if line.strip()}
+except FileNotFoundError:
+    existing = set()
+
+with open(gi_path, "a", encoding="utf-8") as f:
+    for p in patterns:
+        if p not in existing:
+            f.write(p + "\n")
+            print(f"Added: {p}")
+
+def sh(cmd, **kw):
+    return sp.run(cmd, check=True, text=True, **kw)
+
+def norm_variant(v) -> Tuple[str, ...]:
+    """
+    Normalize variant into a hashable, order-preserving tuple.
+    Accepts None, str, list/iterable[str].
+    """
+    if v is None:
+        return ()
+    if isinstance(v, str):
+        return (v,)
+    # assume iterable of strings
+    return tuple(v)
+
+def build_for_arch_variant(arch: str, out_path: Path, variants: Iterable[str]) -> None:
+    """
+    Build FILE for the given arch and variants.
+    For each variant string, append -D<UPPERCASE> to CFLAGS (do not replace).
+    """
+    prefix = PRFX_BY_ARCH[arch]
+    env = {
+        **os.environ,
+        "CC":      f"{prefix}gcc",
+        "CXX":     f"{prefix}g++",
+        "LD":      f"{prefix}ld",
+        "AR":      f"{prefix}ar",
+        "AS":      f"{prefix}as",
+        "NM":      f"{prefix}nm",
+        "OBJCOPY": f"{prefix}objcopy",
+        "OBJDUMP": f"{prefix}objdump",
+        "STRIP":   f"{prefix}strip",
+        "STRINGS": f"{prefix}strings",
+        "RANLIB":  f"{prefix}ranlib",
+        "ARCH":    arch,
+    }
+
+    cflags = env.get("CFLAGS", "")
+    for v in variants:
+        cflags += f" -D{v.upper()}"
+    if cflags.strip():
+        env["CFLAGS"] = cflags.strip()
+
+    sh(["make"] + EXTRA_MAKE_ARGS + ["-B", EXPERIMENT], env=env)
+    shutil.copyfile(EXPERIMENT, out_path)
+    shutil.copymode(EXPERIMENT, out_path)
+
+def rsync_to(machine: str, src: Path, dst_name: str) -> None:
+    sh(["rsync", "--compress", "--ignore-times", "--no-times", "-arh", "--", str(src), f"{machine}:{dst_name}"])
+
+def rsync_from(machine: str, src_name: str, dst: Path) -> None:
+    sh(["rsync", "--compress", "--ignore-times", "--no-times", "-arh", "--", f"{machine}:{src_name}", str(dst)])
+
+def run_on_machine(machine: str, spec: dict, bin_by_key: dict[tuple[str, Tuple[str, ...]], Path]) -> str:
+    """Runs cores sequentially on one machine; returns path to log file."""
+    arch = spec["arch"]
+    variants = norm_variant(spec.get("variant"))
+    cores = list(spec["cores"].keys())
+    log_path = LOG_DIR / f"{machine}.log"
+
+    # Push the correct binary first (idempotent)
+    bin_path = bin_by_key[(arch, variants)]
+    rsync_to(machine, bin_path, EXPERIMENT)
+
+    with open(log_path, "w") as lf:
+        for core in cores:
+            sh(["ssh", machine, "--", f"./{EXPERIMENT} {core}"], stdout=lf, stderr=lf)
+
+    # Pull results
+    for core, uarch in spec["cores"].items():
+        remote_paths, local_paths = result_path_mapping(machine, core, uarch)
+        for local_path, remote_path in zip(local_paths, remote_paths):
+            rsync_from(machine, remote_path, local_path)
+
+    return str(log_path)
+
+def parse_args(argv):
+    p = argparse.ArgumentParser(description="Build and run across selected machines, supporting variant arrays.")
+    p.add_argument("machines", nargs="*", help="Machines to run (default: all known).")
+    p.add_argument("--make-flag", action="append", default=[], help="Extra flags to pass to make (can be used multiple times, e.g. --make-flag FR=1 --make-flag CC=gcc).")
+    p.add_argument("--build-only", action="store_true", help="Only build binaries for selected machine architectures/variants; do not run remotely.")
+    return p.parse_args(argv)
+
+def main(argv=None):
+    global EXTRA_MAKE_ARGS
+
+    if argv is None:
+        argv = sys.argv[1:]
+    args = parse_args(argv)
+
+    EXTRA_MAKE_ARGS += args.make_flag
+
+    # Determine selected machines
+    if args.machines:
+        unknown = [m for m in args.machines if m not in MACHINES]
+        if unknown:
+            print(f"Unknown machine(s): {', '.join(unknown)}", file=sys.stderr)
+            print(f"Known machines: {', '.join(sorted(MACHINES.keys()))}", file=sys.stderr)
+            sys.exit(2)
+        selected = {m: MACHINES[m] for m in args.machines}
+    else:
+        selected = MACHINES
+
+    if not selected:
+        print("No machines selected.", file=sys.stderr)
+        sys.exit(1)
+
+    # Determine which (arch, variants) combos we need to build (only for selected machines)
+    build_reqs = sorted({(spec["arch"], norm_variant(spec.get("variant"))) for spec in selected.values()})
+
+    # Build once per (arch, variants)
+    bin_by_key: dict[tuple[str, Tuple[str, ...]], Path] = {}
+    for arch, variants in build_reqs:
+        # Output binary name: out/FILE_bin-{arch}[-v1-...], keep given order (no sorting)
+        v_sfx = "-".join(variants)
+        suffix = f"{arch}" if not v_sfx else f"{arch}-{v_sfx}"
+        out = BUILD_DIR / f"{EXPERIMENT}_bin-{suffix}"
+        build_for_arch_variant(arch, out, variants)
+        bin_by_key[(arch, variants)] = out
+
+    if args.build_only:
+        print("Build-only mode enabled; skipping remote execution.")
+        for (arch, variants), out in sorted(bin_by_key.items(), key=lambda x: (x[0][0], x[0][1])):
+            variant_str = ",".join(variants) if variants else "none"
+            print(f"[BUILT] {out} (arch={arch}, variants={variant_str})")
+        return
+
+    print(f"Now running on {', '.join(selected)}")
+
+    # Fan out per-machine in parallel; cores stay sequential inside each job
+    had_failure = False
+    with ThreadPoolExecutor(max_workers=len(selected)) as ex:
+        futs = {ex.submit(run_on_machine, m, spec, bin_by_key): m
+                for m, spec in selected.items()}
+        for fut in as_completed(futs):
+            m = futs[fut]
+            try:
+                log_path = fut.result()
+                print(f"[OK] {m} → log: {log_path}")
+            except Exception as e:
+                had_failure = True
+                print(f"[FAIL] {m}: {e}")
+
+    if had_failure:
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

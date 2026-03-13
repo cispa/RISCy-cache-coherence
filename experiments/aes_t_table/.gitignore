@@ -1,0 +1,11 @@
+openssl_*
+hist.csv
+# noldignore
+aes_t_table
+aes_t_table_archsc
+aes_t_table_fr
+aes_t_table_bin*
+logs
+table.tex
+aes_t_table_table.pdf
+t_table_cache_access_patterns.pdf

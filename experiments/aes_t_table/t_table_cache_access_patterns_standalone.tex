@@ -1,0 +1,80 @@
+\documentclass[border=6pt]{standalone}
+
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{pgfplotstable}
+\usepackage{graphicx}
+
+\newcommand{\aesdualheatmap}[2]{%
+\resizebox{\hsize}{!}{%
+\begin{tikzpicture}
+
+\pgfplotstableread[col sep=comma]{#1}\arch
+\pgfplotstableread[col sep=comma]{#2}\timer
+
+\foreach \row in {0,...,15} {
+  \foreach \col in {0,...,15} {
+    \pgfplotstablegetelem{\row}{[index]\col}\of\arch
+    \edef\val{\pgfplotsretval}%
+    \draw[fill=black!\val!white,draw=none] ({(\col+1)/5},-{(\row+1)/5}) rectangle +(0.2,0.2);
+  }
+  \foreach \col in {0,...,5} {
+    \draw[fill=black!0!white,draw=none] ({(16+\col+1)/5},-{(\row+1)/5}) rectangle +(0.2,0.2);
+  }
+  \foreach \col in {0,...,15} {
+    \pgfplotstablegetelem{\row}{[index]\col}\of\timer
+    \edef\val{\pgfplotsretval}%
+    \draw[fill=black!\val!white,draw=none] ({(22+\col+1)/5},-{(\row+1)/5}) rectangle +(0.2,0.2);
+  }
+}
+
+\begin{scope}[xshift=9]
+\node at (1.5,0.7) {Plaintext byte};
+\node at (0,0.2) {\scriptsize \texttt{00}};
+\node at (0.75,0.2) {\scriptsize \texttt{40}};
+\node at (1.5,0.2) {\scriptsize \texttt{80}};
+\node at (2.25,0.2) {\scriptsize \texttt{c0}};
+\node at (3,0.2) {\scriptsize \texttt{f0}};
+\end{scope}
+
+\begin{scope}[xshift=134]
+\node at (1.5,0.7) {Plaintext byte};
+\node at (0,0.2) {\scriptsize \texttt{00}};
+\node at (0.75,0.2) {\scriptsize \texttt{40}};
+\node at (1.5,0.2) {\scriptsize \texttt{80}};
+\node at (2.25,0.2) {\scriptsize \texttt{c0}};
+\node at (3,0.2) {\scriptsize \texttt{f0}};
+\end{scope}
+
+\node at (-0.5,-1.25) {\rotatebox{90}{Cache line}};
+\node[left] at (0.25,-0.1) {\scriptsize \texttt{0}};
+\node[left] at (0.25,-0.9) {\scriptsize \texttt{4}};
+\node[left] at (0.25,-1.7) {\scriptsize \texttt{8}};
+\node[left] at (0.25,-2.5) {\scriptsize \texttt{12}};
+\node[left] at (0.25,-3.1) {\scriptsize \texttt{15}};
+
+\begin{scope}[xshift=126]
+\node at (-0.5,-1.25) {\rotatebox{90}{Cache line}};
+\node[left] at (0.25,-0.1) {\scriptsize \texttt{0}};
+\node[left] at (0.25,-0.9) {\scriptsize \texttt{4}};
+\node[left] at (0.25,-1.7) {\scriptsize \texttt{8}};
+\node[left] at (0.25,-2.5) {\scriptsize \texttt{12}};
+\node[left] at (0.25,-3.1) {\scriptsize \texttt{15}};
+\end{scope}
+
+\end{tikzpicture}%
+}%
+}
+
+\begin{document}
+\begin{tabular}{c}
+\textbf{T-Head XuanTie C910} \\
+\aesdualheatmap{aes_t_table_results/C910_hist_archsc.csv}{aes_t_table_results/C910_hist_timer.csv} \\
+\\
+\textbf{Qualcomm Oryon} \\
+\aesdualheatmap{aes_t_table_results/Oryon_hist_archsc.csv}{aes_t_table_results/Oryon_hist_timer.csv} \\
+\\
+\textbf{Loongson 3A5000-HV} \\
+\aesdualheatmap{aes_t_table_results/3A5000-HV_hist_archsc.csv}{aes_t_table_results/3A5000-HV_hist_timer.csv}
+\end{tabular}
+\end{document}
