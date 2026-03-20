@@ -1,7 +1,7 @@
 # Artifact – RISCy Cache Coherence: Timer-Free Architectural Cache Attacks via Instruction/Data Cache Incoherence
 
 This repository contains the artifact for the paper *"RISCy Cache Coherence: Timer-Free Architectural Cache Attacks via Instruction/Data Cache Incoherence"*.
-It is archived on [Zenodo](TODO).
+It is archived on [Zenodo](https://doi.org/10.5281/zenodo.19127138).
 
 > [!NOTE]
 > This repository relies on [Git LFS](https://git-lfs.com/) to handle large files. Please install it **before** cloning the repository. If you cloned without having LFS installed or have other problems with LFS files run: `git lfs install && git lfs pull`.
