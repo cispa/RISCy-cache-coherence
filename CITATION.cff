@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use I2SC in your work or just want to cite our work, please cite it as below."
+title: "RISCy Cache Coherence: Timer-Free Architectural Cache Attacks via Instruction/Data Cache Incoherence"
+version: 1.0.0
+date-released: 2026-05-18
+url: "https://github.com/cispa/RISCy-cache-coherence"
+
+authors:
+  - family-names: "Thomas"
+    given-names: "Fabian"
+    orcid: "https://orcid.org/0009-0008-8029-0621"
+    affiliation: "CISPA Helmholtz Center for Information Security"
+  - family-names: "Schwarz"
+    given-names: "Michael"
+    orcid: "https://orcid.org/0000-0001-6744-3410"
+    affiliation: "CISPA Helmholtz Center for Information Security"
+
+preferred-citation:
+  type: conference-paper
+  title: "RISCy Cache Coherence: Timer-Free Architectural Cache Attacks via Instruction/Data Cache Incoherence"
+  collection-title: "Proceedings of the 47th IEEE Symposium on Security and Privacy (S&P '26)"
+  year: 2026
+  authors:
+    - family-names: "Thomas"
+      given-names: "Fabian"
+      orcid: "https://orcid.org/0009-0008-8029-0621"
+    - family-names: "Schwarz"
+      given-names: "Michael"
+      orcid: "https://orcid.org/0000-0001-6744-3410"
