@@ -7,6 +7,10 @@ import os
 import sys
 from typing import Dict, List, Tuple, Optional, Iterable
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from table_order import iter_grouped_rows
+
 RESET = "\x1b[0m"
 
 Key4 = Tuple[int, int, int, int]
@@ -42,7 +46,7 @@ def nonlinearize(t: float, gamma: float) -> float:
     return t ** gamma
 
 
-def _detect_header_aliases(fieldnames: Iterable[str]) -> Dict[str, str]:
+def _detect_header_aliases(fieldnames: Iterable[str]) -> Dict[str, Optional[str]]:
     fields = {f.strip(): f.strip() for f in (fieldnames or [])}
 
     def first_present(*candidates: str) -> Optional[str]:
@@ -322,48 +326,57 @@ def main():
     latex_rows_text: List[List[Optional[str]]] = []
     latex_rows_colors: List[List[Optional[Tuple[int, int, int]]]] = []
 
-    for micro, rows in sorted(data.items()):
-        base_val = rows.get(BASEKEY)
+    ordered_groups = iter_grouped_rows(list(data.items()), key=lambda item: item[0])
 
-        if micro in IN_ORDER_SET:
+    emitted_group_count = 0
+    for _, group_items in ordered_groups:
+        visible_group_items = [(micro, rows) for micro, rows in group_items if micro not in IN_ORDER_SET]
+        if not visible_group_items:
             continue
 
-        # Prepare display values (raw or % vs baseline)
-        disp_vals_by_case: Dict[Key5, Optional[float]] = {}
-        for c in display_cases:
-            raw_v = rows.get(c)
-            if raw_v is None:
-                disp_vals_by_case[c] = None
-            elif pct_baseline:
-                if base_val is None or base_val == 0:
-                    disp_vals_by_case[c] = None
-                else:
-                    disp_vals_by_case[c] = (raw_v / base_val - 1.0) * 100.0
-            else:
-                disp_vals_by_case[c] = raw_v
+        if args.latex and emitted_group_count > 0:
+            latex_rows_text.append([r"\midrule"])
+            latex_rows_colors.append([None])
 
-        if range_mode:
-            present = []
+        for micro, rows in visible_group_items:
+            base_val = rows.get(BASEKEY)
+
+            # Prepare display values (raw or % vs baseline)
+            disp_vals_by_case: Dict[Key5, Optional[float]] = {}
             for c in display_cases:
-                if c in (CASE_TD_LOAD, CASE_TD_CLOAD):
-                    slow = rows.get(BASEKEY)
-                    fast = rows.get(CASE_LOAD)
-                else:
-                    slow = rows.get(BASEKEY)
-                    fast = rows.get(CASE_JUMP)
                 raw_v = rows.get(c)
-                if slow is not None and fast is not None and raw_v is not None:
-                    present.append(normalize_between(raw_v, slow, fast))
-        else:
-            present = [v for v in disp_vals_by_case.values() if v is not None]
-        vmin, vmax = (min(present), max(present)) if present else (0.0, 0.0)
+                if raw_v is None:
+                    disp_vals_by_case[c] = None
+                elif pct_baseline:
+                    if base_val is None or base_val == 0:
+                        disp_vals_by_case[c] = None
+                    else:
+                        disp_vals_by_case[c] = (raw_v / base_val - 1.0) * 100.0
+                else:
+                    disp_vals_by_case[c] = raw_v
 
-        # Start row with µarch and out-of-order flag
-        plain_cells = [micro]
-        color_cells: List[Optional[Tuple[int, int, int]]] = [None]
+            if range_mode:
+                present = []
+                for c in display_cases:
+                    if c in (CASE_TD_LOAD, CASE_TD_CLOAD):
+                        slow = rows.get(BASEKEY)
+                        fast = rows.get(CASE_LOAD)
+                    else:
+                        slow = rows.get(BASEKEY)
+                        fast = rows.get(CASE_JUMP)
+                    raw_v = rows.get(c)
+                    if slow is not None and fast is not None and raw_v is not None:
+                        present.append(normalize_between(raw_v, slow, fast))
+            else:
+                present = [v for v in disp_vals_by_case.values() if v is not None]
+            vmin, vmax = (min(present), max(present)) if present else (0.0, 0.0)
 
-        latex_cells: List[Optional[str]] = [latex_escape(micro)]
-        latex_colors: List[Optional[Tuple[int, int, int]]] = [None]
+            # Start row with µarch and out-of-order flag
+            plain_cells = [micro]
+            color_cells: List[Optional[Tuple[int, int, int]]] = [None]
+
+            latex_cells: List[Optional[str]] = [latex_escape(micro)]
+            latex_colors: List[Optional[Tuple[int, int, int]]] = [None]
 
         # Out-of-order column: checkmark if NOT in known in-order list.
         # is_ooo = micro not in IN_ORDER_SET
@@ -378,86 +391,88 @@ def main():
         #     latex_cells.append("")
         #     latex_colors.append(None)
 
-        # Emit per-case cells.
-        for c in display_cases:
-            if range_mode:
-                if c in (CASE_TD_LOAD, CASE_TD_CLOAD):
-                    slow = rows.get(BASEKEY)
-                    fast = rows.get(CASE_LOAD)
+            # Emit per-case cells.
+            for c in display_cases:
+                if range_mode:
+                    if c in (CASE_TD_LOAD, CASE_TD_CLOAD):
+                        slow = rows.get(BASEKEY)
+                        fast = rows.get(CASE_LOAD)
+                    else:
+                        slow = rows.get(BASEKEY)
+                        fast = rows.get(CASE_JUMP)
+                    raw_v = rows.get(c)
+                    if slow is None or fast is None or raw_v is None:
+                        v = None
+                    else:
+                        v = normalize_between(raw_v, slow, fast)
                 else:
-                    slow = rows.get(BASEKEY)
-                    fast = rows.get(CASE_JUMP)
-                raw_v = rows.get(c)
-                if slow is None or fast is None or raw_v is None:
-                    v = None
+                    v = disp_vals_by_case[c]
+                if v is None:
+                    plain_cells.append("-")
+                    color_cells.append((120, 120, 120) if not args.no_color else None)
+                    latex_cells.append("-")
+                    latex_colors.append((180, 180, 180))
                 else:
-                    v = normalize_between(raw_v, slow, fast)
+                    s_term = format_value(v) if range_mode else (format_pct(v) if pct_baseline else format_value(v))
+                    plain_cells.append(s_term)
+                    if args.no_color or args.latex:
+                        color_cells.append(None)
+                    else:
+                        if range_mode:
+                            color_cells.append(green_to_red(1.0 - v))
+                        else:
+                            t = 0.5 if vmax == vmin else (v - vmin) / (vmax - vmin)
+                            t = nonlinearize(t, args.gamma)
+                            color_cells.append(green_to_red(t))
+
+                    s_tex = latex_format_value(-100.0 * v, True) if range_mode else latex_format_value(v, pct_baseline)
+                    latex_cells.append(s_tex)
+                    if range_mode:
+                        latex_colors.append(red_to_blue(v))
+                    else:
+                        t = 0.5 if vmax == vmin else (v - vmin) / (vmax - vmin)
+                        t = nonlinearize(t, args.gamma)
+                        latex_colors.append(red_to_blue(t))
+
+            # --- \bbtwo check (raw or % depending on output mode) ---
+            raw_tdj = rows.get(CASE_TD_JUMP)
+            raw_tdcj = rows.get(CASE_TD_CJUMP)
+            if pct_baseline:
+                disp_tdj = disp_vals_by_case.get(CASE_TD_JUMP)
+                disp_tdcj = disp_vals_by_case.get(CASE_TD_CJUMP)
+                if disp_tdj is None or disp_tdcj is None:
+                    works_bbtwo = None
+                else:
+                    works_bbtwo = (disp_tdj - 10.0) > disp_tdcj
             else:
-                v = disp_vals_by_case[c]
-            if v is None:
+                if raw_tdj is None or raw_tdcj is None:
+                    works_bbtwo = None
+                else:
+                    works_bbtwo = (raw_tdj - 10.0) > raw_tdcj
+
+            if works_bbtwo is None:
                 plain_cells.append("-")
                 color_cells.append((120, 120, 120) if not args.no_color else None)
                 latex_cells.append("-")
                 latex_colors.append((180, 180, 180))
+            elif works_bbtwo:
+                plain_cells.append("✓")
+                color_cells.append(None)
+                latex_cells.append(r"\cmark")
+                latex_colors.append(None)
             else:
-                s_term = format_value(v) if range_mode else (format_pct(v) if pct_baseline else format_value(v))
-                plain_cells.append(s_term)
-                if args.no_color or args.latex:
-                    color_cells.append(None)
-                else:
-                    if range_mode:
-                        color_cells.append(green_to_red(1.0 - v))
-                    else:
-                        t = 0.5 if vmax == vmin else (v - vmin) / (vmax - vmin)
-                        t = nonlinearize(t, args.gamma)
-                        color_cells.append(green_to_red(t))
+                plain_cells.append("")
+                color_cells.append(None)
+                latex_cells.append("")
+                latex_colors.append(None)
 
-                s_tex = latex_format_value(-100.0 * v, True) if range_mode else latex_format_value(v, pct_baseline)
-                latex_cells.append(s_tex)
-                if range_mode:
-                    latex_colors.append(red_to_blue(v))
-                else:
-                    t = 0.5 if vmax == vmin else (v - vmin) / (vmax - vmin)
-                    t = nonlinearize(t, args.gamma)
-                    latex_colors.append(red_to_blue(t))
+            plain_rows.append(plain_cells)
+            color_rows.append(color_cells)
 
-        # --- \bbtwo check (raw or % depending on output mode) ---
-        raw_tdj = rows.get(CASE_TD_JUMP)
-        raw_tdcj = rows.get(CASE_TD_CJUMP)
-        if pct_baseline:
-            disp_tdj = disp_vals_by_case.get(CASE_TD_JUMP)
-            disp_tdcj = disp_vals_by_case.get(CASE_TD_CJUMP)
-            if disp_tdj is None or disp_tdcj is None:
-                works_bbtwo = None
-            else:
-                works_bbtwo = (disp_tdj - 10.0) > disp_tdcj
-        else:
-            if raw_tdj is None or raw_tdcj is None:
-                works_bbtwo = None
-            else:
-                works_bbtwo = (raw_tdj - 10.0) > raw_tdcj
+            latex_rows_text.append(latex_cells)
+            latex_rows_colors.append(latex_colors)
 
-        if works_bbtwo is None:
-            plain_cells.append("-")
-            color_cells.append((120, 120, 120) if not args.no_color else None)
-            latex_cells.append("-")
-            latex_colors.append((180, 180, 180))
-        elif works_bbtwo:
-            plain_cells.append("✓")
-            color_cells.append(None)
-            latex_cells.append(r"\cmark")
-            latex_colors.append(None)
-        else:
-            plain_cells.append("")
-            color_cells.append(None)
-            latex_cells.append("")
-            latex_colors.append(None)
-
-        plain_rows.append(plain_cells)
-        color_rows.append(color_cells)
-
-        latex_rows_text.append(latex_cells)
-        latex_rows_colors.append(latex_colors)
+        emitted_group_count += 1
 
     if args.latex:
         print("% LaTeX table generated by transient_fetch_test/table.py")
@@ -472,6 +487,9 @@ def main():
         print(r" & \\")
         print(r"\midrule")
         for text_row, color_row in zip(latex_rows_text, latex_rows_colors):
+            if len(text_row) == 1 and text_row[0] == r"\midrule":
+                print(r"\midrule")
+                continue
             cells = []
             for s, c in zip(text_row, color_row):
                 s = "-" if s is None else s
